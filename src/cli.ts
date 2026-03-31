@@ -16,6 +16,10 @@ import { MockOrchestrator } from "./mock-orchestrator.js";
 import { Renderer } from "./renderer.js";
 import { slugifyPrompt } from "./utils/slugify.js";
 
+const packageVersion = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
+).version as string;
+
 function ask(question: string): Promise<string> {
   const rl = createInterface({
     input: process.stdin,
@@ -34,7 +38,7 @@ const program = new Command();
 program
   .name("gnhf")
   .description("Before I go to bed, I tell my agents: good night, have fun")
-  .version("0.1.0")
+  .version(packageVersion)
   .argument("[prompt]", "The objective for the coding agent")
   .option("--agent <agent>", "Agent to use (claude or codex)", "claude")
   .option("--mock", "", false)
