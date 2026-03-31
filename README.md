@@ -1,5 +1,5 @@
 <p align="center">Before I go to bed, I tell my agents:</p>
-<h2 align="center">good night, have fun</h2>
+<h1 align="center">good night, have fun</h1>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/gnhf"
@@ -36,7 +36,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/splash.png" alt="gnhf — Good Night, Have Fun" width="720">
+  <img src="docs/splash.png" alt="gnhf — Good Night, Have Fun" width="800">
 </p>
 
 gnhf is a [ralph loop](https://ghuntley.com/ralph/) orchestrator that keeps your agents running while you sleep — each iteration makes one small, committed, documented change towards an objective.
