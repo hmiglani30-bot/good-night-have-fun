@@ -139,7 +139,7 @@ npm link
 - **Runtime caps** - `--max-iterations` stops before the next iteration begins, `--max-tokens` can abort mid-iteration once reported usage reaches the cap, and `--stop-when` ends the loop after an iteration whose agent output reports the natural-language condition is met; uncommitted work is rolled back in either case, and in the interactive TUI the final state remains visible until you press Ctrl+C to exit
 - **Shared memory** — the agent reads `notes.md` (built up from prior iterations) to communicate across iterations
 - **Local run metadata** — gnhf stores prompt, notes, and resume metadata under `.gnhf/runs/` and ignores it locally, so your branch only contains intentional work
-- **Resume support** — run `gnhf` while on an existing `gnhf/` branch to pick up where a previous run left off
+- **Resume support** — run `gnhf` while on an existing `gnhf/` branch to pick up where a previous run left off; if you provide a different prompt, gnhf asks whether to overwrite the saved prompt, start a new branch, or quit
 
 ### Worktree Mode
 
@@ -165,17 +165,19 @@ Pass `--worktree` to run each agent in an isolated [git worktree](https://git-sc
 | `echo "<prompt>" \| gnhf` | Pipe prompt via stdin                           |
 | `cat prd.md \| gnhf`      | Pipe a large spec or PRD via stdin              |
 
+If you run `gnhf` on an existing `gnhf/` branch with a different prompt, gnhf asks whether to overwrite the saved prompt, start a new branch, or quit. When the prompt came from stdin, that confirmation is read from the controlling terminal, so it must be available.
+
 ### Flags
 
-| Flag                     | Description                                                           | Default                |
-| ------------------------ | --------------------------------------------------------------------- | ---------------------- |
-| `--agent <agent>`        | Agent to use (`claude`, `codex`, `rovodev`, or `opencode`)            | config file (`claude`) |
-| `--max-iterations <n>`   | Abort after `n` total iterations                                      | unlimited              |
-| `--max-tokens <n>`       | Abort after `n` total input+output tokens                             | unlimited              |
-| `--stop-when <cond>`     | End the loop when the agent reports this natural-language condition is met | unlimited         |
-| `--prevent-sleep <mode>` | Prevent system sleep during the run (`on`/`off` or `true`/`false`)    | config file (`on`)     |
-| `--worktree`             | Run in a separate git worktree (enables multiple agents concurrently) | `false`                |
-| `--version`              | Show version                                                          |                        |
+| Flag                     | Description                                                                | Default                |
+| ------------------------ | -------------------------------------------------------------------------- | ---------------------- |
+| `--agent <agent>`        | Agent to use (`claude`, `codex`, `rovodev`, or `opencode`)                 | config file (`claude`) |
+| `--max-iterations <n>`   | Abort after `n` total iterations                                           | unlimited              |
+| `--max-tokens <n>`       | Abort after `n` total input+output tokens                                  | unlimited              |
+| `--stop-when <cond>`     | End the loop when the agent reports this natural-language condition is met | unlimited              |
+| `--prevent-sleep <mode>` | Prevent system sleep during the run (`on`/`off` or `true`/`false`)         | config file (`on`)     |
+| `--worktree`             | Run in a separate git worktree (enables multiple agents concurrently)      | `false`                |
+| `--version`              | Show version                                                               |                        |
 
 ## Configuration
 
