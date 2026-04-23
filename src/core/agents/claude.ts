@@ -209,6 +209,7 @@ export class ClaudeAgent implements Agent {
       }
 
       let resultEvent: ClaudeResultEvent | null = null;
+      let latestResultUsage: ClaudeResultEvent["usage"] | null = null;
       const cumulative: TokenUsage = {
         inputTokens: 0,
         outputTokens: 0,
@@ -311,7 +312,24 @@ export class ClaudeAgent implements Agent {
         }
 
         if (event.type === "result") {
-          resultEvent = event as ClaudeResultEvent;
+          const next = event as ClaudeResultEvent;
+          latestResultUsage = next.usage;
+          // Prefer the last result event that carried structured_output.
+          // Claude sessions can produce multiple result events across turns
+          // (e.g. ScheduleWakeup fires or a Stop hook resumes background
+          // work). Follow-up turns typically have structured_output: null,
+          // which must not clobber a previously-valid one. But the agent
+          // could also submit structured output in a later turn (e.g. first
+          // turn scheduled a wakeup, second turn produced the answer), so a
+          // valid later event should still win.
+          if (
+            next.is_error ||
+            next.subtype !== "success" ||
+            next.structured_output ||
+            !resultEvent
+          ) {
+            resultEvent = next;
+          }
         }
       });
 
@@ -334,7 +352,7 @@ export class ClaudeAgent implements Agent {
         }
 
         const output: AgentOutput = resultEvent.structured_output;
-        const usage = toTokenUsage(resultEvent.usage);
+        const usage = toTokenUsage(latestResultUsage ?? resultEvent.usage);
 
         onUsage?.(usage);
         resolve({ output, usage });
