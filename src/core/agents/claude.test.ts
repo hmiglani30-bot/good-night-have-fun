@@ -45,8 +45,11 @@ describe("ClaudeAgent", () => {
   it("spawns claude with stream-json output format", () => {
     const proc = createMockProcess();
     mockSpawn.mockReturnValue(proc);
+    const unixAgent = new ClaudeAgent({
+      platform: "darwin",
+    });
 
-    agent.run("test prompt", "/work/dir");
+    unixAgent.run("test prompt", "/work/dir");
 
     expect(mockSpawn).toHaveBeenCalledWith(
       "claude",
@@ -62,6 +65,7 @@ describe("ClaudeAgent", () => {
       ],
       {
         cwd: "/work/dir",
+        detached: true,
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
@@ -117,6 +121,7 @@ describe("ClaudeAgent", () => {
       ],
       {
         cwd: "/work/dir",
+        detached: false,
         shell: false,
         stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
@@ -148,6 +153,7 @@ describe("ClaudeAgent", () => {
       ],
       {
         cwd: "/work/dir",
+        detached: false,
         shell: true,
         stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
@@ -182,6 +188,7 @@ describe("ClaudeAgent", () => {
       ],
       {
         cwd: "/work/dir",
+        detached: false,
         shell: true,
         stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
@@ -237,6 +244,238 @@ describe("ClaudeAgent", () => {
       { stdio: "ignore" },
     );
     expect(proc.kill).not.toHaveBeenCalled();
+  });
+
+  it("terminates the process group after a final structured output if Claude stays alive", async () => {
+    vi.useFakeTimers();
+    const processKill = vi
+      .spyOn(process, "kill")
+      .mockImplementation(() => true);
+    try {
+      const proc = createMockProcess();
+      Object.defineProperty(proc, "pid", { value: 4321 });
+      mockSpawn.mockReturnValue(proc);
+      const configuredAgent = new ClaudeAgent({
+        finalResultGraceMs: 25,
+        platform: "darwin",
+      });
+
+      const promise = configuredAgent.run("prompt", "/cwd");
+
+      emitLine(proc, {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        usage: {
+          input_tokens: 7,
+          cache_read_input_tokens: 8,
+          cache_creation_input_tokens: 9,
+          output_tokens: 10,
+        },
+        structured_output: {
+          success: true,
+          summary: "done",
+          key_changes_made: [],
+          key_learnings: [],
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(24);
+      expect(processKill).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(processKill).toHaveBeenCalledWith(-4321, "SIGTERM");
+
+      proc.emit("close", null);
+      await expect(promise).resolves.toMatchObject({
+        output: { success: true, summary: "done" },
+      });
+    } finally {
+      processKill.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("force kills Claude if it ignores the final-result shutdown signal", async () => {
+    vi.useFakeTimers();
+    const processKill = vi
+      .spyOn(process, "kill")
+      .mockImplementation((pid, signal) => {
+        if (pid === -4321 && signal === "SIGKILL") {
+          queueMicrotask(() => {
+            proc.emit("close", null);
+          });
+        }
+        return true;
+      });
+    const proc = createMockProcess();
+    Object.defineProperty(proc, "pid", { value: 4321 });
+    mockSpawn.mockReturnValue(proc);
+    const configuredAgent = new ClaudeAgent({
+      finalResultGraceMs: 25,
+      platform: "darwin",
+    });
+
+    try {
+      const promise = configuredAgent.run("prompt", "/cwd");
+
+      emitLine(proc, {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        usage: {
+          input_tokens: 7,
+          cache_read_input_tokens: 8,
+          cache_creation_input_tokens: 9,
+          output_tokens: 10,
+        },
+        structured_output: {
+          success: true,
+          summary: "done",
+          key_changes_made: [],
+          key_learnings: [],
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(25);
+      expect(processKill).toHaveBeenCalledWith(-4321, "SIGTERM");
+
+      await vi.advanceTimersByTimeAsync(2_999);
+      expect(processKill).not.toHaveBeenCalledWith(-4321, "SIGKILL");
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(processKill).toHaveBeenCalledWith(-4321, "SIGKILL");
+
+      await expect(promise).resolves.toMatchObject({
+        output: { success: true, summary: "done" },
+      });
+    } finally {
+      processKill.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("restarts the final-result cleanup timer when a later turn returns structured output", async () => {
+    vi.useFakeTimers();
+    const processKill = vi
+      .spyOn(process, "kill")
+      .mockImplementation(() => true);
+    try {
+      const proc = createMockProcess();
+      Object.defineProperty(proc, "pid", { value: 4321 });
+      mockSpawn.mockReturnValue(proc);
+      const configuredAgent = new ClaudeAgent({
+        finalResultGraceMs: 25,
+        platform: "darwin",
+      });
+
+      const promise = configuredAgent.run("prompt", "/cwd");
+
+      emitLine(proc, {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        usage: {
+          input_tokens: 7,
+          cache_read_input_tokens: 8,
+          cache_creation_input_tokens: 9,
+          output_tokens: 10,
+        },
+        structured_output: {
+          success: true,
+          summary: "first turn",
+          key_changes_made: [],
+          key_learnings: [],
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(20);
+
+      emitLine(proc, {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        usage: {
+          input_tokens: 11,
+          cache_read_input_tokens: 12,
+          cache_creation_input_tokens: 13,
+          output_tokens: 14,
+        },
+        structured_output: {
+          success: true,
+          summary: "second turn",
+          key_changes_made: [],
+          key_learnings: [],
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(4);
+      expect(processKill).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(processKill).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(19);
+      expect(processKill).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(processKill).toHaveBeenCalledWith(-4321, "SIGTERM");
+
+      proc.emit("close", null);
+      await expect(promise).resolves.toMatchObject({
+        output: { success: true, summary: "second turn" },
+      });
+    } finally {
+      processKill.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits 15 seconds by default before terminating after final structured output", async () => {
+    vi.useFakeTimers();
+    const processKill = vi
+      .spyOn(process, "kill")
+      .mockImplementation(() => true);
+    try {
+      const proc = createMockProcess();
+      Object.defineProperty(proc, "pid", { value: 4321 });
+      mockSpawn.mockReturnValue(proc);
+      const unixAgent = new ClaudeAgent({
+        platform: "darwin",
+      });
+
+      const promise = unixAgent.run("prompt", "/cwd");
+
+      emitLine(proc, {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        usage: {
+          input_tokens: 7,
+          cache_read_input_tokens: 8,
+          cache_creation_input_tokens: 9,
+          output_tokens: 10,
+        },
+        structured_output: {
+          success: true,
+          summary: "done",
+          key_changes_made: [],
+          key_learnings: [],
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(processKill).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(processKill).toHaveBeenCalledWith(-4321, "SIGTERM");
+
+      proc.emit("close", null);
+      await promise;
+    } finally {
+      processKill.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("resolves with parsed output and usage on success", async () => {
@@ -926,7 +1165,7 @@ describe("ClaudeAgent", () => {
     });
   });
 
-  it("rejects when a later result event reports an error without structured output", async () => {
+  it("keeps the last structured success when a later error result arrives", async () => {
     const proc = createMockProcess();
     mockSpawn.mockReturnValue(proc);
 
@@ -965,6 +1204,18 @@ describe("ClaudeAgent", () => {
 
     proc.emit("close", 0);
 
-    await expect(promise).rejects.toThrow("claude reported error");
+    const result = await promise;
+    expect(result.output).toEqual({
+      success: true,
+      summary: "first real result",
+      key_changes_made: ["file.ts"],
+      key_learnings: [],
+    });
+    expect(result.usage).toEqual({
+      inputTokens: 32,
+      outputTokens: 42,
+      cacheReadTokens: 21,
+      cacheCreationTokens: 5,
+    });
   });
 });
