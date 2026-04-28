@@ -3,6 +3,7 @@ export function buildIterationPrompt(params: {
   runId: string;
   prompt: string;
   stopWhen?: string;
+  steer?: string;
 }): string {
   const outputFields = [
     "- success: whether you were able to make a meaningful contribution that got us closer towards the objective. setting this to false means any code change you made should be discarded",
@@ -22,6 +23,11 @@ export function buildIterationPrompt(params: {
       ? `\n\n## Stop Condition\n\nThe user has configured a condition to end the loop: ${params.stopWhen}\nIf this condition is fully met after this iteration's work, set should_fully_stop=true in your output. Otherwise set it to false.`
       : "";
 
+  const steerSection =
+    params.steer && params.steer.trim().length > 0
+      ? `\n\n## Operator Steer\n\nThe operator has injected the following guidance for this iteration. Treat it as authoritative if it conflicts with prior notes:\n\n${params.steer.trim()}`
+      : "";
+
   return `You are working autonomously towards an objective given below.
 This is iteration ${params.n}. Each iteration aims to make an incremental step forward, not to complete the entire objective.
 
@@ -36,7 +42,7 @@ This is iteration ${params.n}. Each iteration aims to make an incremental step f
 
 ## Output
 
-${outputFields.join("\n")}${stopConditionSection}
+${outputFields.join("\n")}${stopConditionSection}${steerSection}
 
 ## Objective
 

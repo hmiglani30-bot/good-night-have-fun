@@ -1,5 +1,6 @@
 <p align="center">Before I go to bed, I tell my agents:</p>
 <h1 align="center">good night, have fun</h1>
+<p align="center"><strong>The agent-agnostic orchestration layer for autonomous coding</strong></p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/gnhf"
@@ -41,8 +42,15 @@
 
 Never wake up empty-handed.
 
-gnhf is a [ralph](https://ghuntley.com/ralph/), [autoresearch](https://github.com/karpathy/autoresearch)-style orchestrator that keeps your agents running while you sleep — each iteration makes one small, committed, documented change towards an objective.
-You wake up to a branch full of clean work and a log of everything that happened.
+## What is gnhf?
+
+gnhf is the **orchestration layer** between you and your coding agents. It is not an agent itself — it is the infrastructure that makes agents useful when you are not watching.
+
+You give gnhf an objective, pick any supported agent (Claude Code, Codex, GitHub Copilot CLI, Rovo Dev, or OpenCode), and walk away. gnhf runs your agent in an autonomous loop: each successful iteration becomes a clean git commit, each failure is rolled back, and context accumulates across iterations through shared memory. You wake up to a branch full of clean work and a complete log of everything that happened.
+
+**Why an orchestration layer?** Running a coding agent manually is like running a container by hand — it works, but it does not scale. gnhf handles the concerns that matter for long-running autonomous work: commit hygiene, failure recovery, token budgeting, runtime caps, worktree isolation, and cross-iteration context. It is agent-agnostic by design, so you can use the best agent for each job without lock-in.
+
+gnhf is a [ralph](https://ghuntley.com/ralph/), [autoresearch](https://github.com/karpathy/autoresearch)-style orchestrator — each iteration makes one small, committed, documented change towards an objective.
 
 - **Dead simple** — one command starts an autonomous loop that runs until you Ctrl+C or a configured runtime cap is reached
 - **Long running** — each iteration is committed on success, rolled back on failure, with sensible retries; hard agent errors back off exponentially while agent-reported failures continue immediately

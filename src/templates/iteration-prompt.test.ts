@@ -81,4 +81,25 @@ describe("buildIterationPrompt", () => {
     expect(result).toContain("set it to false");
     expect(result).not.toContain("omit it");
   });
+
+  it("injects an Operator Steer section when steer text is provided", () => {
+    const result = buildIterationPrompt({
+      n: 2,
+      runId: "run-1",
+      prompt: "do stuff",
+      steer: "  focus on the auth module  ",
+    });
+    expect(result).toContain("## Operator Steer");
+    expect(result).toContain("focus on the auth module");
+  });
+
+  it("omits the Operator Steer section when steer is empty or whitespace", () => {
+    const result = buildIterationPrompt({
+      n: 2,
+      runId: "run-1",
+      prompt: "do stuff",
+      steer: "   ",
+    });
+    expect(result).not.toContain("Operator Steer");
+  });
 });

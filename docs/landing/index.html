@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="gnhf is the agent-agnostic orchestrator that keeps your coding agents running while you sleep. Wake up to a branch full of clean, committed work."
+    />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta property="og:title" content="gnhf — good night, have fun" />
+    <meta
+      property="og:description"
+      content="Tell your agents good night, wake up to clean commits. Agent-agnostic orchestration for autonomous coding agents."
+    />
+    <meta property="og:type" content="website" />
+    <title>gnhf — Good night, have fun</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0a0a0a;
+        --fg: #f5f5f5;
+        --muted: #a3a3a3;
+        --accent: #f5d76e;
+        --card: #141414;
+        --border: #262626;
+        --mono:
+          ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code",
+          "Source Code Pro", Menlo, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family:
+          ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+          "Helvetica Neue", sans-serif;
+        font-feature-settings:
+          "ss01" 1,
+          "cv11" 1;
+        -webkit-font-smoothing: antialiased;
+      }
+      a {
+        color: var(--fg);
+      }
+      a:hover {
+        color: var(--accent);
+      }
+      .container {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+      header {
+        padding: 48px 0 16px;
+      }
+      header nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 24px;
+        font-size: 14px;
+      }
+      header nav .brand {
+        font-family: var(--mono);
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      header nav ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        gap: 20px;
+      }
+      header nav a {
+        text-decoration: none;
+      }
+      .hero {
+        padding: 72px 0 96px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+      }
+      .hero p.kicker {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+      }
+      .hero h1 {
+        margin: 0 0 24px;
+        font-size: clamp(40px, 7vw, 72px);
+        line-height: 1.05;
+        letter-spacing: -0.02em;
+      }
+      .hero h1 em {
+        font-style: normal;
+        color: var(--accent);
+      }
+      .hero p.lead {
+        margin: 0 0 36px;
+        font-size: 20px;
+        color: var(--muted);
+        max-width: 640px;
+        line-height: 1.5;
+      }
+      .ctas {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 12px 20px;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: 600;
+        border: 1px solid var(--border);
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #1a1a1a;
+        border-color: var(--accent);
+      }
+      .btn-primary:hover {
+        color: #1a1a1a;
+        opacity: 0.9;
+      }
+      .btn-ghost:hover {
+        border-color: var(--accent);
+      }
+      .install {
+        margin-top: 36px;
+        padding: 16px 20px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-family: var(--mono);
+        font-size: 14px;
+        max-width: 640px;
+      }
+      section {
+        padding: 72px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      section h2 {
+        margin: 0 0 32px;
+        font-size: clamp(28px, 4vw, 40px);
+        letter-spacing: -0.01em;
+      }
+      .features {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 20px;
+      }
+      .feature {
+        padding: 20px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--card);
+      }
+      .feature h3 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+      .feature p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.5;
+      }
+      .feature .icon {
+        font-family: var(--mono);
+        color: var(--accent);
+        font-size: 20px;
+        margin-bottom: 8px;
+      }
+      pre.demo {
+        font-family: var(--mono);
+        font-size: 14px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        overflow-x: auto;
+        line-height: 1.5;
+      }
+      .agents {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin-top: 16px;
+      }
+      .agent {
+        padding: 16px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--card);
+        text-align: center;
+        font-family: var(--mono);
+        font-size: 14px;
+      }
+      footer {
+        padding: 48px 0;
+        color: var(--muted);
+        font-size: 14px;
+        text-align: center;
+      }
+      footer a {
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="container">
+        <nav>
+          <span class="brand">gnhf</span>
+          <ul>
+            <li><a href="/guide/getting-started">Docs</a></li>
+            <li><a href="https://github.com/kunchenguid/gnhf">GitHub</a></li>
+            <li><a href="https://discord.gg/Wsy2NpnZDu">Discord</a></li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="container">
+        <p class="kicker">good night, have fun</p>
+        <h1>
+          Tell your agents <em>good night.</em><br />
+          Wake up to clean commits.
+        </h1>
+        <p class="lead">
+          gnhf is the agent-agnostic orchestrator that keeps your coding
+          agents running while you sleep. Each iteration ships a small,
+          committed, documented change towards your objective. You wake up to
+          a branch you can review, cherry-pick, or merge.
+        </p>
+        <div class="ctas">
+          <a class="btn btn-primary" href="/guide/getting-started"
+            >Get started</a
+          >
+          <a class="btn btn-ghost" href="https://github.com/kunchenguid/gnhf"
+            >Star on GitHub</a
+          >
+        </div>
+        <pre class="install">$ npm install -g gnhf
+$ cd your-repo
+$ gnhf "reduce complexity without changing functionality"</pre>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <h2>Why gnhf</h2>
+        <div class="features">
+          <div class="feature">
+            <div class="icon">&gt;</div>
+            <h3>Dead simple</h3>
+            <p>
+              One command starts an autonomous loop that runs until you
+              <code>Ctrl+C</code> or hit a configured cap.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="icon">~</div>
+            <h3>Long running</h3>
+            <p>
+              Commit on success, roll back on failure, exponential backoff on
+              hard errors. Built for unattended overnight runs.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="icon">*</div>
+            <h3>Agent-agnostic</h3>
+            <p>
+              Works with Claude Code, Codex, Rovo Dev, OpenCode, or GitHub
+              Copilot CLI. Switch with a single flag.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="icon">&amp;</div>
+            <h3>Parallel worktrees</h3>
+            <p>
+              Run multiple agents on the same repo without interference. Each
+              gets its own isolated working directory and branch.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="icon">$</div>
+            <h3>Cost visibility</h3>
+            <p>
+              <code>gnhf stats</code> aggregates per-agent token spend and
+              estimates the dollar cost of every overnight run.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="icon">!</div>
+            <h3>Operator controls</h3>
+            <p>
+              Pause, steer, or abort a running loop without killing the
+              process. Auto-PR via the <code>gh</code> CLI when commits land.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <h2>How it works</h2>
+        <pre class="demo">$ gnhf "add tests for the orchestrator module" --max-iterations 8
+  iteration 1: read notes.md, plan first test
+  iteration 2: add fixtures and run setup
+  iteration 3: cover happy-path orchestrator loop
+  iteration 4: cover token-cap abort
+  ...
+  ----------------------------------------------
+  Run summary: 8 iters (7 ok / 1 failed) — $0.34
+  Branch:      gnhf/add-tests-for-the-orchestra…
+  Open PR:     https://github.com/you/repo/pull/123</pre>
+        <p style="color: var(--muted); margin-top: 24px">
+          gnhf creates a dedicated branch, writes <code>prompt.md</code> and
+          shared <code>notes.md</code>, and loops: build the iteration prompt
+          → invoke your agent → commit on success or roll back on failure →
+          repeat. Token caps, iteration caps, and natural-language stop
+          conditions keep runs bounded.
+        </p>
+      </div>
+    </section>
+
+    <section>
+      <div class="container">
+        <h2>Bring your own agent</h2>
+        <p style="color: var(--muted); max-width: 640px">
+          gnhf is the orchestration layer — your agent does the work. Pick
+          one (or several, via <code>--worktree</code>):
+        </p>
+        <div class="agents">
+          <div class="agent">Claude Code</div>
+          <div class="agent">OpenAI Codex</div>
+          <div class="agent">GitHub Copilot CLI</div>
+          <div class="agent">Atlassian Rovo Dev</div>
+          <div class="agent">OpenCode</div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="container">
+        Released under the MIT License.
+        <a href="https://github.com/kunchenguid/gnhf">Source on GitHub</a> ·
+        <a href="https://discord.gg/Wsy2NpnZDu">Discord</a> ·
+        <a href="https://x.com/kunchenguid">X / @kunchenguid</a>
+      </div>
+    </footer>
+  </body>
+</html>

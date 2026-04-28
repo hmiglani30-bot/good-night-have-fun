@@ -19,6 +19,7 @@ export interface Config {
   agentArgsOverride: Partial<Record<AgentName, string[]>>;
   maxConsecutiveFailures: number;
   preventSleep: boolean;
+  telemetry: boolean;
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -27,6 +28,7 @@ const DEFAULT_CONFIG: Config = {
   agentArgsOverride: {},
   maxConsecutiveFailures: 3,
   preventSleep: true,
+  telemetry: false,
 };
 
 class InvalidConfigError extends Error {}

@@ -1,20 +1,8 @@
-import {
-  closeSync,
-  createReadStream,
-  createWriteStream,
-  mkdtempSync,
-  openSync,
-  readFileSync,
-  rmSync,
-  rmdirSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import process from "node:process";
-import { createInterface } from "node:readline";
-import { Command, InvalidArgumentError } from "commander";
-import { AGENT_NAMES, loadConfig, type AgentName } from "./core/config.js";
+import { Command } from "commander";
+import { AGENT_NAMES, loadConfig } from "./core/config.js";
 import {
   appendDebugLog,
   initDebugLog,
@@ -22,272 +10,168 @@ import {
 } from "./core/debug-log.js";
 import {
   ensureCleanWorkingTree,
-  createBranch,
-  getHeadCommit,
   getCurrentBranch,
-  getRepoRootDir,
-  createWorktree,
   removeWorktree,
 } from "./core/git.js";
-import {
-  type RunInfo,
-  setupRun,
-  resumeRun,
-  getLastIterationNumber,
-} from "./core/run.js";
+import { setupRun, resumeRun, getLastIterationNumber } from "./core/run.js";
 import { readStdinText } from "./core/stdin.js";
 import { startSleepPrevention } from "./core/sleep.js";
 import { createAgent } from "./core/agents/factory.js";
 import { Orchestrator } from "./core/orchestrator.js";
 import { MockOrchestrator } from "./mock-orchestrator.js";
 import { Renderer } from "./renderer.js";
-import { slugifyPrompt } from "./utils/slugify.js";
+import { HeadlessRenderer } from "./headless-renderer.js";
+import { loadCheckpoint } from "./core/checkpoint.js";
+import {
+  calculateCost,
+  formatRunStats,
+  formatStatsReport,
+  loadAllStats,
+  saveStats,
+  type RunStats,
+} from "./core/analytics.js";
+import { runInit } from "./cli/init.js";
+import { runWizard } from "./cli/wizard.js";
+import {
+  initializeNewBranch,
+  initializeWorktreeRun,
+} from "./cli/branch-management.js";
+import {
+  getTelemetrySessionId,
+  isTelemetryEnabled,
+  trackEvent,
+} from "./core/telemetry.js";
+import {
+  parseNotificationFlag,
+  sendNotification,
+  type RunSummary,
+} from "./core/notifications.js";
+import { createAutoPr } from "./core/auto-pr.js";
+import {
+  formatComparison,
+  formatHistoryTable,
+  findRun,
+  loadRunHistory,
+} from "./core/run-history.js";
+import {
+  clearPause,
+  writeAbort,
+  writePause,
+  writeSteer,
+} from "./core/steering.js";
+import {
+  ask,
+  PromptSignalError,
+  persistStdinPromptForReexec,
+  readReexecStdinPrompt,
+  GNHF_REEXEC_STDIN_PROMPT_FILE,
+} from "./cli/prompt-handling.js";
+import { enterAltScreen, exitAltScreen, die } from "./cli/screen.js";
+import {
+  parseNonNegativeInteger,
+  parseOnOffBoolean,
+  isAgentName,
+  AGENT_NAME_LIST,
+} from "./cli/parsers.js";
 
 const packageVersion = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
 ).version as string;
 const FORCE_EXIT_TIMEOUT_MS = 5_000;
-const GNHF_REEXEC_STDIN_PROMPT = "GNHF_REEXEC_STDIN_PROMPT";
-const GNHF_REEXEC_STDIN_PROMPT_FILE = "GNHF_REEXEC_STDIN_PROMPT_FILE";
-const GNHF_REEXEC_STDIN_PROMPT_DIR_PREFIX = "gnhf-stdin-";
-const GNHF_REEXEC_STDIN_PROMPT_FILENAME = "prompt.txt";
-const AGENT_NAME_SET = new Set<string>(AGENT_NAMES);
-const AGENT_NAME_LIST = `"${AGENT_NAMES.slice(0, -1).join('", "')}", or "${
-  AGENT_NAMES[AGENT_NAMES.length - 1]
-}"`;
-
-class PromptSignalError extends Error {
-  constructor(public readonly signal: NodeJS.Signals) {
-    super(signal);
-  }
-}
-
-function parseNonNegativeInteger(value: string): number {
-  if (!/^\d+$/.test(value)) {
-    throw new InvalidArgumentError("must be a non-negative integer");
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isSafeInteger(parsed)) {
-    throw new InvalidArgumentError("must be a safe integer");
-  }
-
-  return parsed;
-}
-
-function parseOnOffBoolean(value: string): boolean {
-  if (value === "on" || value === "true") return true;
-  if (value === "off" || value === "false") return false;
-  throw new InvalidArgumentError(
-    'must be one of: "on", "off", "true", "false"',
-  );
-}
-
-function humanizeErrorMessage(message: string): string {
-  if (message.includes("not a git repository")) {
-    return 'This command must be run inside a Git repository. Change into a repo or run "git init" first.';
-  }
-
-  return message;
-}
-
-function isAgentName(name: string): name is AgentName {
-  return AGENT_NAME_SET.has(name);
-}
-
-function initializeNewBranch(
-  prompt: string,
-  cwd: string,
-  schemaOptions: { includeStopField: boolean },
-): RunInfo {
-  ensureCleanWorkingTree(cwd);
-  const baseCommit = getHeadCommit(cwd);
-  const branchName = slugifyPrompt(prompt);
-  createBranch(branchName, cwd);
-  const runId = branchName.split("/")[1]!;
-  return setupRun(runId, prompt, baseCommit, cwd, schemaOptions);
-}
-
-interface WorktreeRunResult {
-  runInfo: RunInfo;
-  worktreePath: string;
-  effectiveCwd: string;
-}
-
-function initializeWorktreeRun(
-  prompt: string,
-  cwd: string,
-  schemaOptions: { includeStopField: boolean },
-): WorktreeRunResult {
-  // Intentionally skip ensureCleanWorkingTree() — git worktree add creates
-  // an independent working directory from HEAD; uncommitted changes in the
-  // main checkout don't carry over, so a dirty tree is harmless here.
-  const repoRoot = getRepoRootDir(cwd);
-  const baseCommit = getHeadCommit(cwd);
-  const branchName = slugifyPrompt(prompt);
-  const runId = branchName.split("/")[1]!;
-  const worktreePath = join(
-    dirname(repoRoot),
-    `${basename(repoRoot)}-gnhf-worktrees`,
-    runId,
-  );
-  createWorktree(repoRoot, worktreePath, branchName);
-  const runInfo = setupRun(
-    runId,
-    prompt,
-    baseCommit,
-    worktreePath,
-    schemaOptions,
-  );
-  return { runInfo, worktreePath, effectiveCwd: worktreePath };
-}
-
-function openPromptTerminal(): {
-  input: NodeJS.ReadableStream;
-  output: NodeJS.WritableStream;
-  cleanup: () => void;
-} {
-  if (process.stdin.isTTY) {
-    return {
-      input: process.stdin,
-      output: process.stderr,
-      cleanup: () => {},
-    };
-  }
-
-  const inputPath = process.platform === "win32" ? "CONIN$" : "/dev/tty";
-  const outputPath = process.platform === "win32" ? "CONOUT$" : "/dev/tty";
-  const inputFd = openSync(inputPath, "r");
-  try {
-    const outputFd = openSync(outputPath, "w");
-    try {
-      const input = createReadStream("", { autoClose: true, fd: inputFd });
-      const output = createWriteStream("", { autoClose: true, fd: outputFd });
-      return {
-        input,
-        output,
-        cleanup: () => {
-          input.destroy();
-          output.destroy();
-        },
-      };
-    } catch (error) {
-      closeSync(outputFd);
-      throw error;
-    }
-  } catch (error) {
-    closeSync(inputFd);
-    throw error;
-  }
-}
-
-function ask(
-  question: string,
-  closeMessage: string,
-  unavailableMessage: string,
-): Promise<string> {
-  let terminal;
-  try {
-    terminal = openPromptTerminal();
-  } catch {
-    throw new Error(unavailableMessage);
-  }
-
-  const rl = createInterface({
-    input: terminal.input,
-    output: terminal.output,
-  });
-  return new Promise((resolve, reject) => {
-    const handleClose = () => {
-      terminal.cleanup();
-      rl.off("close", handleClose);
-      rl.off("SIGINT", handleSigInt);
-      reject(new Error(closeMessage));
-    };
-
-    const handleSigInt = () => {
-      rl.off("close", handleClose);
-      rl.off("SIGINT", handleSigInt);
-      rl.close();
-      terminal.cleanup();
-      reject(new PromptSignalError("SIGINT"));
-    };
-
-    rl.once("close", handleClose);
-    rl.once("SIGINT", handleSigInt);
-    rl.question(question, (answer) => {
-      rl.off("close", handleClose);
-      rl.off("SIGINT", handleSigInt);
-      rl.close();
-      terminal.cleanup();
-      resolve(answer.trim().toLowerCase());
-    });
-  });
-}
 
 function getSignalExitCode(signal: NodeJS.Signals): number {
   return signal === "SIGINT" ? 130 : 143;
 }
 
-function persistStdinPromptForReexec(prompt: string): {
-  path: string;
-  cleanup: () => void;
-} {
-  const promptDir = mkdtempSync(
-    join(tmpdir(), GNHF_REEXEC_STDIN_PROMPT_DIR_PREFIX),
-  );
-  const promptPath = join(promptDir, GNHF_REEXEC_STDIN_PROMPT_FILENAME);
-  writeFileSync(promptPath, prompt, { encoding: "utf-8", mode: 0o600 });
-  return {
-    path: promptPath,
-    cleanup: () => {
-      rmSync(promptDir, { recursive: true, force: true });
-    },
-  };
+interface PostRunSideEffectsParams {
+  runStats: RunStats;
+  finalStatus: "running" | "waiting" | "aborted" | "stopped";
+  runInfo: { runId: string };
+  branchName: string;
+  cwd: string;
+  prompt: string;
+  iterations: number;
+  successCount: number;
+  failCount: number;
+  commitCount: number;
+  worktreePath: string | null;
+  notifyWebhook?: string;
+  notifySlack?: string;
+  autoPr: boolean;
+  autoPrBase?: string;
+  autoPrDraft: boolean;
+  telemetrySessionId: string;
 }
 
-function isTrustedReexecPromptPath(promptPath: string): boolean {
-  const resolvedPromptPath = resolve(promptPath);
-  const promptDir = dirname(resolvedPromptPath);
-  return (
-    basename(resolvedPromptPath) === GNHF_REEXEC_STDIN_PROMPT_FILENAME &&
-    dirname(promptDir) === resolve(tmpdir()) &&
-    basename(promptDir).startsWith(GNHF_REEXEC_STDIN_PROMPT_DIR_PREFIX)
-  );
-}
-
-function cleanupTrustedReexecPromptPath(promptPath: string): void {
-  if (!isTrustedReexecPromptPath(promptPath)) {
-    return;
+async function runPostRunSideEffects(
+  params: PostRunSideEffectsParams,
+): Promise<void> {
+  if (isTelemetryEnabled()) {
+    trackEvent({
+      event: "run.complete",
+      timestamp: new Date().toISOString(),
+      sessionId: params.telemetrySessionId,
+      properties: {
+        agent: params.runStats.agent,
+        iterations: params.iterations,
+        successCount: params.successCount,
+        failCount: params.failCount,
+        durationMs: params.runStats.durationMs,
+        totalInputTokens: params.runStats.totalInputTokens,
+        totalOutputTokens: params.runStats.totalOutputTokens,
+        estimatedCostUsd: params.runStats.estimatedCostUsd,
+        status: params.finalStatus,
+      },
+    });
   }
 
-  const resolvedPromptPath = resolve(promptPath);
-  rmSync(resolvedPromptPath, { force: true });
-  try {
-    rmdirSync(dirname(resolvedPromptPath));
-  } catch {
-    // Leave the directory in place if anything unexpected remains.
-  }
-}
-
-function readReexecStdinPrompt(env: NodeJS.ProcessEnv): string | undefined {
-  const promptPath = env[GNHF_REEXEC_STDIN_PROMPT_FILE];
-  if (promptPath !== undefined) {
-    delete env[GNHF_REEXEC_STDIN_PROMPT_FILE];
-    try {
-      return readFileSync(promptPath, "utf-8");
-    } finally {
-      cleanupTrustedReexecPromptPath(promptPath);
+  const targets = parseNotificationFlag(params.notifyWebhook, params.notifySlack);
+  if (targets.length > 0) {
+    const summary: RunSummary = {
+      runId: params.runInfo.runId,
+      agent: params.runStats.agent,
+      status: params.finalStatus,
+      iterations: params.iterations,
+      successCount: params.successCount,
+      failCount: params.failCount,
+      totalInputTokens: params.runStats.totalInputTokens,
+      totalOutputTokens: params.runStats.totalOutputTokens,
+      estimatedCostUsd: params.runStats.estimatedCostUsd,
+      durationMs: params.runStats.durationMs,
+      worktreePath: params.worktreePath,
+    };
+    for (const target of targets) {
+      try {
+        await sendNotification(target, summary);
+      } catch (err) {
+        console.error(
+          `  gnhf: notification (${target.type}) failed — ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
 
-  const prompt = env[GNHF_REEXEC_STDIN_PROMPT];
-  if (prompt !== undefined) {
-    delete env[GNHF_REEXEC_STDIN_PROMPT];
-    return prompt;
+  if (params.autoPr && params.commitCount > 0) {
+    const result = createAutoPr(
+      {
+        branch: params.branchName,
+        prompt: params.prompt,
+        successCount: params.successCount,
+        failCount: params.failCount,
+        iterations: params.iterations,
+        baseBranch: params.autoPrBase,
+        draft: params.autoPrDraft,
+      },
+      params.cwd,
+    );
+    if (result.status === "created") {
+      console.error(`  gnhf: opened PR ${result.url ?? ""}`);
+    } else {
+      console.error(`  gnhf: auto-pr skipped — ${result.reason ?? "unknown"}`);
+    }
+  } else if (params.autoPr) {
+    console.error("  gnhf: auto-pr skipped — no commits produced");
   }
-
-  return undefined;
 }
 
 const program = new Command();
@@ -322,6 +206,43 @@ program
     "Run in a separate git worktree (enables multiple agents on the same repo)",
     false,
   )
+  .option(
+    "--resume",
+    "Resume from the last checkpoint saved in the run directory",
+    false,
+  )
+  .option(
+    "--headless",
+    "Disable TUI and output structured JSON lines to stdout (for CI)",
+    false,
+  )
+  .option(
+    "--wizard",
+    "Run the interactive objective wizard to build a prompt",
+    false,
+  )
+  .option(
+    "--auto-pr",
+    "When the run finishes with commits, push the branch and open a PR via the gh CLI",
+    false,
+  )
+  .option(
+    "--auto-pr-base <branch>",
+    "Base branch to target for --auto-pr (defaults to gh's default)",
+  )
+  .option(
+    "--auto-pr-draft",
+    "Open the PR as a draft when --auto-pr is enabled",
+    false,
+  )
+  .option(
+    "--notify-webhook <url>",
+    "POST a JSON run summary to this URL when the run finishes",
+  )
+  .option(
+    "--notify-slack <url>",
+    "POST a Slack-formatted summary to this incoming-webhook URL when the run finishes",
+  )
   .option("--mock", "", false)
   .action(
     async (
@@ -333,6 +254,14 @@ program
         stopWhen?: string;
         preventSleep?: boolean;
         worktree: boolean;
+        resume: boolean;
+        headless: boolean;
+        wizard: boolean;
+        autoPr: boolean;
+        autoPrBase?: string;
+        autoPrDraft: boolean;
+        notifyWebhook?: string;
+        notifySlack?: string;
         mock: boolean;
       },
     ) => {
@@ -391,6 +320,12 @@ program
 
       if (!prompt && process.env.GNHF_SLEEP_INHIBITED === "1") {
         prompt = readReexecStdinPrompt(process.env);
+      }
+      if (!prompt && options.wizard) {
+        if (!process.stdin.isTTY) {
+          die("--wizard requires an interactive terminal");
+        }
+        prompt = await runWizard();
       }
       if (!prompt && !process.stdin.isTTY) {
         prompt = await readStdinText(process.stdin);
@@ -491,6 +426,20 @@ program
         runInfo = initializeNewBranch(prompt, cwd, schemaOptions);
       }
 
+      // --resume: restore iteration counter and token counts from checkpoint
+      if (options.resume && runInfo) {
+        const checkpoint = loadCheckpoint(runInfo.runDir);
+        if (checkpoint) {
+          startIteration = checkpoint.iteration;
+          appendDebugLog("checkpoint:restored", {
+            runId: checkpoint.runId,
+            iteration: checkpoint.iteration,
+            totalInputTokens: checkpoint.totalInputTokens,
+            totalOutputTokens: checkpoint.totalOutputTokens,
+          });
+        }
+      }
+
       let sleepPreventionCleanup: (() => Promise<void>) | null = null;
       if (config.preventSleep) {
         const persistedPrompt =
@@ -522,6 +471,28 @@ program
         }
       }
 
+      const telemetrySessionId = getTelemetrySessionId();
+      if (isTelemetryEnabled()) {
+        trackEvent({
+          event: "run.start",
+          timestamp: new Date().toISOString(),
+          sessionId: telemetrySessionId,
+          properties: {
+            agent: config.agent,
+            headless: options.headless,
+            worktree: options.worktree,
+            hasMaxIterations: options.maxIterations !== undefined,
+            hasMaxTokens: options.maxTokens !== undefined,
+            hasStopWhen: options.stopWhen !== undefined,
+            promptFromStdin,
+            wizard: options.wizard,
+            platform: process.platform,
+            nodeVersion: process.version,
+            gnhfVersion: packageVersion,
+          },
+        });
+      }
+
       initDebugLog(runInfo.logPath);
       appendDebugLog("run:start", {
         args: process.argv.slice(2),
@@ -538,6 +509,8 @@ program
         agentArgsOverride: config.agentArgsOverride?.[config.agent],
         worktree: options.worktree,
         worktreePath,
+        headless: options.headless,
+        resume: options.resume,
         platform: process.platform,
         nodeVersion: process.version,
         gnhfVersion: packageVersion,
@@ -565,6 +538,119 @@ program
       );
       let shutdownSignal: NodeJS.Signals | null = null;
 
+      // Headless mode: structured JSON lines, no TUI
+      if (options.headless) {
+        const headlessRenderer = new HeadlessRenderer(
+          orchestrator,
+          process.stdout,
+        );
+        headlessRenderer.start();
+
+        const requestShutdown = (signal: NodeJS.Signals) => {
+          if (shutdownSignal) return;
+          shutdownSignal = signal;
+          appendDebugLog(`signal:${signal}`);
+          headlessRenderer.stop();
+          orchestrator.stop();
+        };
+        const handleSigInt = () => requestShutdown("SIGINT");
+        const handleSigTerm = () => requestShutdown("SIGTERM");
+        process.on("SIGINT", handleSigInt);
+        process.on("SIGTERM", handleSigTerm);
+
+        try {
+          await orchestrator.start();
+        } catch (err) {
+          appendDebugLog("orchestrator:fatal", {
+            error: serializeError(err),
+          });
+          die(err instanceof Error ? err.message : String(err));
+        } finally {
+          headlessRenderer.stop();
+          process.off("SIGINT", handleSigInt);
+          process.off("SIGTERM", handleSigTerm);
+          await sleepPreventionCleanup?.();
+        }
+
+        const finalState = orchestrator.getState();
+        appendDebugLog("run:complete", {
+          signal: shutdownSignal,
+          status: finalState.status,
+          iterations: finalState.currentIteration,
+          successCount: finalState.successCount,
+          failCount: finalState.failCount,
+          totalInputTokens: finalState.totalInputTokens,
+          totalOutputTokens: finalState.totalOutputTokens,
+          commitCount: finalState.commitCount,
+          worktreePath,
+        });
+
+        const durationMs = Date.now() - finalState.startTime.getTime();
+        const runStats: RunStats = {
+          runId: runInfo.runId,
+          totalInputTokens: finalState.totalInputTokens,
+          totalOutputTokens: finalState.totalOutputTokens,
+          estimatedCostUsd: calculateCost(
+            finalState.totalInputTokens,
+            finalState.totalOutputTokens,
+            config.agent,
+          ),
+          iterations: finalState.currentIteration,
+          successCount: finalState.successCount,
+          failCount: finalState.failCount,
+          durationMs,
+          agent: config.agent,
+        };
+
+        try {
+          saveStats(undefined, runStats);
+        } catch {
+          // Best-effort; don't block shutdown
+        }
+        // In headless mode, print stats to stderr so stdout stays clean JSON
+        console.error(formatRunStats(runStats));
+
+        await runPostRunSideEffects({
+          runStats,
+          finalStatus: finalState.status,
+          runInfo,
+          branchName: `gnhf/${runInfo.runId}`,
+          cwd: effectiveCwd,
+          prompt,
+          iterations: finalState.currentIteration,
+          successCount: finalState.successCount,
+          failCount: finalState.failCount,
+          commitCount: finalState.commitCount,
+          worktreePath,
+          notifyWebhook: options.notifyWebhook,
+          notifySlack: options.notifySlack,
+          autoPr: options.autoPr,
+          autoPrBase: options.autoPrBase,
+          autoPrDraft: options.autoPrDraft,
+          telemetrySessionId,
+        });
+
+        if (worktreePath) {
+          if (finalState.commitCount > 0) {
+            worktreeCleanup = null;
+            console.error(
+              `\n  gnhf: worktree preserved at ${worktreePath}` +
+                `\n  gnhf: merge the branch and remove with: git worktree remove "${worktreePath}"\n`,
+            );
+          } else {
+            worktreeCleanup?.();
+            worktreeCleanup = null;
+            appendDebugLog("worktree:cleaned-up", { worktreePath });
+          }
+        }
+
+        if (shutdownSignal) {
+          process.exit(getSignalExitCode(shutdownSignal));
+        }
+        return;
+      }
+
+      // Normal TUI mode
       enterAltScreen();
       const renderer = new Renderer(orchestrator, prompt, config.agent);
       renderer.start();
@@ -641,6 +727,51 @@ program
           worktreePath,
         });
 
+        const durationMs =
+          Date.now() - finalState.startTime.getTime();
+        const runStats: RunStats = {
+          runId: runInfo.runId,
+          totalInputTokens: finalState.totalInputTokens,
+          totalOutputTokens: finalState.totalOutputTokens,
+          estimatedCostUsd: calculateCost(
+            finalState.totalInputTokens,
+            finalState.totalOutputTokens,
+            config.agent,
+          ),
+          iterations: finalState.currentIteration,
+          successCount: finalState.successCount,
+          failCount: finalState.failCount,
+          durationMs,
+          agent: config.agent,
+        };
+
+        try {
+          saveStats(undefined, runStats);
+        } catch {
+          // Best-effort; don't block shutdown
+        }
+        console.error(formatRunStats(runStats));
+
+        await runPostRunSideEffects({
+          runStats,
+          finalStatus: finalState.status,
+          runInfo,
+          branchName: `gnhf/${runInfo.runId}`,
+          cwd: effectiveCwd,
+          prompt,
+          iterations: finalState.currentIteration,
+          successCount: finalState.successCount,
+          failCount: finalState.failCount,
+          commitCount: finalState.commitCount,
+          worktreePath,
+          notifyWebhook: options.notifyWebhook,
+          notifySlack: options.notifySlack,
+          autoPr: options.autoPr,
+          autoPrBase: options.autoPrBase,
+          autoPrDraft: options.autoPrDraft,
+          telemetrySessionId,
+        });
+
         if (worktreePath) {
           if (finalState.commitCount > 0) {
             worktreeCleanup = null;
@@ -664,20 +795,130 @@ program
     },
   );
 
-function enterAltScreen() {
-  process.stdout.write("\x1b[?1049h");
-  process.stdout.write("\x1b[?25l");
+program
+  .command("stats")
+  .description("Display cumulative usage statistics from all recorded runs")
+  .action(() => {
+    const allStats = loadAllStats();
+    console.log(formatStatsReport(allStats));
+  });
+
+program
+  .command("init")
+  .description("Interactive setup wizard for gnhf configuration")
+  .action(async () => {
+    await runInit();
+  });
+
+function resolveRunDir(runId: string, cwd: string): string {
+  return join(cwd, ".gnhf", "runs", runId);
 }
 
-function exitAltScreen() {
-  process.stdout.write("\x1b[?25h");
-  process.stdout.write("\x1b[?1049l");
+function ensureRunDirExists(runDir: string, runId: string): void {
+  if (!existsSync(runDir)) {
+    die(`No run directory found for "${runId}" at ${runDir}`);
+  }
 }
 
-function die(message: string): never {
-  console.error(`\n  gnhf: ${humanizeErrorMessage(message)}\n`);
-  process.exit(1);
-}
+program
+  .command("pause")
+  .argument("[runId]", "Run ID to pause (defaults to the current gnhf branch)")
+  .description("Signal a running gnhf loop to pause before its next iteration")
+  .action((runIdArg: string | undefined) => {
+    const cwd = process.cwd();
+    const runId = runIdArg ?? getCurrentBranch(cwd).replace(/^gnhf\//, "");
+    if (!runId || runId.startsWith("gnhf")) {
+      die("Could not infer a run ID. Run from a gnhf/ branch or pass one explicitly.");
+    }
+    const runDir = resolveRunDir(runId, cwd);
+    ensureRunDirExists(runDir, runId);
+    writePause(runDir);
+    console.error(`  gnhf: paused ${runId}. Run \`gnhf resume ${runId}\` to continue.`);
+  });
+
+program
+  .command("resume-run")
+  .argument("[runId]", "Run ID to resume (defaults to the current gnhf branch)")
+  .description("Clear a previously-set pause so the loop continues")
+  .action((runIdArg: string | undefined) => {
+    const cwd = process.cwd();
+    const runId = runIdArg ?? getCurrentBranch(cwd).replace(/^gnhf\//, "");
+    if (!runId || runId.startsWith("gnhf")) {
+      die("Could not infer a run ID. Run from a gnhf/ branch or pass one explicitly.");
+    }
+    const runDir = resolveRunDir(runId, cwd);
+    ensureRunDirExists(runDir, runId);
+    clearPause(runDir);
+    console.error(`  gnhf: resumed ${runId}.`);
+  });
+
+program
+  .command("steer")
+  .argument("<text...>", "Steering text to append to the next iteration prompt")
+  .option("--run-id <runId>", "Target run (defaults to the current gnhf branch)")
+  .option("--from-file <path>", "Read the steer text from a file instead of args")
+  .description("Inject operator guidance into the next iteration prompt")
+  .action((text: string[], opts: { runId?: string; fromFile?: string }) => {
+    const cwd = process.cwd();
+    const runId = opts.runId ?? getCurrentBranch(cwd).replace(/^gnhf\//, "");
+    if (!runId || runId.startsWith("gnhf")) {
+      die("Could not infer a run ID. Run from a gnhf/ branch or pass --run-id.");
+    }
+    const runDir = resolveRunDir(runId, cwd);
+    ensureRunDirExists(runDir, runId);
+
+    const body = opts.fromFile
+      ? readFileSync(opts.fromFile, "utf-8")
+      : text.join(" ").trim();
+    if (!body) {
+      die("Refusing to write an empty steer message.");
+    }
+    writeSteer(runDir, body);
+    console.error(
+      `  gnhf: steer recorded for ${runId} (${body.length} chars). It will be applied to the next iteration.`,
+    );
+  });
+
+program
+  .command("abort")
+  .argument("[runId]", "Run ID to abort (defaults to the current gnhf branch)")
+  .option("--reason <text>", "Reason recorded alongside the abort", "operator requested abort")
+  .description("Ask the orchestrator to stop cleanly between iterations")
+  .action((runIdArg: string | undefined, opts: { reason: string }) => {
+    const cwd = process.cwd();
+    const runId = runIdArg ?? getCurrentBranch(cwd).replace(/^gnhf\//, "");
+    if (!runId || runId.startsWith("gnhf")) {
+      die("Could not infer a run ID. Run from a gnhf/ branch or pass one explicitly.");
+    }
+    const runDir = resolveRunDir(runId, cwd);
+    ensureRunDirExists(runDir, runId);
+    writeAbort(runDir, opts.reason);
+    console.error(`  gnhf: abort recorded for ${runId}.`);
+  });
+
+program
+  .command("runs")
+  .description("List recorded runs in this repository")
+  .action(() => {
+    const cwd = process.cwd();
+    const entries = loadRunHistory(cwd);
+    process.stdout.write(formatHistoryTable(entries));
+  });
+
+program
+  .command("compare")
+  .argument("<runA>", "First run ID")
+  .argument("<runB>", "Second run ID")
+  .description("Compare two recorded runs side-by-side")
+  .action((runAId: string, runBId: string) => {
+    const cwd = process.cwd();
+    const entries = loadRunHistory(cwd);
+    const a = findRun(entries, runAId);
+    const b = findRun(entries, runBId);
+    if (!a) die(`Could not find run "${runAId}" — try \`gnhf runs\`.`);
+    if (!b) die(`Could not find run "${runBId}" — try \`gnhf runs\`.`);
+    process.stdout.write(formatComparison(a, b));
+  });
 
 try {
   await program.parseAsync();

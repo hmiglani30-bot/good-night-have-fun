@@ -3,6 +3,13 @@
   "version": "0.1.26",
   "description": "Before I go to bed, I tell my agents: good night, have fun",
   "type": "module",
+  "main": "dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+    }
+  },
   "bin": {
     "gnhf": "dist/cli.mjs"
   },

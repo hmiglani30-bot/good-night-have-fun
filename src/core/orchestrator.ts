@@ -5,6 +5,14 @@ import type { Config } from "./config.js";
 import type { RunInfo } from "./run.js";
 import { appendNotes, toStringArray } from "./run.js";
 import { appendDebugLog, serializeError } from "./debug-log.js";
+import { saveCheckpoint } from "./checkpoint.js";
+import {
+  clearSteer,
+  isPaused,
+  readSteer,
+  shouldAbort,
+  waitWhilePaused,
+} from "./steering.js";
 import {
   commitAll,
   getBranchCommitCount,
@@ -186,6 +194,37 @@ export class Orchestrator extends EventEmitter<OrchestratorEvents> {
           break;
         }
 
+        if (shouldAbort(this.runInfo.runDir)) {
+          this.abort("operator abort file present");
+          break;
+        }
+
+        if (isPaused(this.runInfo.runDir)) {
+          this.state.status = "waiting";
+          this.state.lastMessage = "paused (waiting for `gnhf resume`)";
+          this.emit("state", this.getState());
+          appendDebugLog("steering:paused", {
+            iteration: this.state.currentIteration,
+          });
+          const result = await waitWhilePaused(this.runInfo.runDir);
+          appendDebugLog("steering:pause-resolved", { result });
+          if (result === "aborted" || this.stopRequested) {
+            this.abort("operator abort while paused");
+            break;
+          }
+          this.state.status = "running";
+          this.emit("state", this.getState());
+        }
+
+        const steer = readSteer(this.runInfo.runDir);
+        if (steer) {
+          appendDebugLog("steering:steer-applied", {
+            iteration: this.state.currentIteration + 1,
+            length: steer.length,
+          });
+          clearSteer(this.runInfo.runDir);
+        }
+
         this.state.currentIteration++;
         this.state.status = "running";
         this.emit("iteration:start", this.state.currentIteration);
@@ -196,6 +235,7 @@ export class Orchestrator extends EventEmitter<OrchestratorEvents> {
           runId: this.runInfo.runId,
           prompt: this.prompt,
           stopWhen: this.limits.stopWhen,
+          steer: steer ?? undefined,
         });
 
         appendDebugLog("iteration:start", {
@@ -234,6 +274,15 @@ export class Orchestrator extends EventEmitter<OrchestratorEvents> {
         this.state.iterations.push(record);
         this.emit("iteration:end", record);
         this.emit("state", this.getState());
+
+        try {
+          saveCheckpoint(this.runInfo.runDir, this.state);
+        } catch (err) {
+          appendDebugLog("checkpoint:save-error", {
+            iteration: this.state.currentIteration,
+            error: serializeError(err),
+          });
+        }
 
         appendDebugLog("iteration:end", {
           iteration: record.number,
