@@ -1,6 +1,5 @@
 <p align="center">Before I go to bed, I tell my agents:</p>
 <h1 align="center">good night, have fun</h1>
-<p align="center"><strong>The agent-agnostic orchestration layer for autonomous coding</strong></p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/gnhf"
@@ -40,22 +39,73 @@
   <img src="docs/splash.png" alt="gnhf — Good Night, Have Fun" width="800">
 </p>
 
+> **About this fork.** This is a value-added fork of [`kunchenguid/gnhf`](https://github.com/kunchenguid/gnhf) maintained by [@hmiglani30](https://github.com/hmiglani30). It tracks upstream and ships 19 additional improvements built across five product perspectives — programmatic API, headless/CI mode, checkpoint & resume, run history, steering, completion notifications, auto-PR, an interactive wizard, telemetry, usage analytics, a docs site, contributor governance, and strategic documentation. See [What This Fork Adds](#what-this-fork-adds) for the full list, or jump straight to the [docs site](./docs/index.md).
+
 Never wake up empty-handed.
 
-## What is gnhf?
-
-gnhf is the **orchestration layer** between you and your coding agents. It is not an agent itself — it is the infrastructure that makes agents useful when you are not watching.
-
-You give gnhf an objective, pick any supported agent (Claude Code, Codex, GitHub Copilot CLI, Rovo Dev, or OpenCode), and walk away. gnhf runs your agent in an autonomous loop: each successful iteration becomes a clean git commit, each failure is rolled back, and context accumulates across iterations through shared memory. You wake up to a branch full of clean work and a complete log of everything that happened.
-
-**Why an orchestration layer?** Running a coding agent manually is like running a container by hand — it works, but it does not scale. gnhf handles the concerns that matter for long-running autonomous work: commit hygiene, failure recovery, token budgeting, runtime caps, worktree isolation, and cross-iteration context. It is agent-agnostic by design, so you can use the best agent for each job without lock-in.
-
-gnhf is a [ralph](https://ghuntley.com/ralph/), [autoresearch](https://github.com/karpathy/autoresearch)-style orchestrator — each iteration makes one small, committed, documented change towards an objective.
+gnhf is a [ralph](https://ghuntley.com/ralph/), [autoresearch](https://github.com/karpathy/autoresearch)-style orchestrator that keeps your agents running while you sleep — each iteration makes one small, committed, documented change towards an objective.
+You wake up to a branch full of clean work and a log of everything that happened.
 
 - **Dead simple** — one command starts an autonomous loop that runs until you Ctrl+C or a configured runtime cap is reached
 - **Long running** — each iteration is committed on success, rolled back on failure, with sensible retries; hard agent errors back off exponentially while agent-reported failures continue immediately
 - **Live terminal title** — interactive runs keep your terminal title updated with live status, token totals, and commit count, then restore the previous title on exit
 - **Agent-agnostic**: works with Claude Code, Codex, Rovo Dev, OpenCode, or GitHub Copilot CLI out of the box
+
+## What This Fork Adds
+
+Built on top of upstream commit [`8d34043`](https://github.com/kunchenguid/gnhf/commit/8d34043)'s parent — 19 production-grade improvements organized across five product perspectives. Every item below ships with code in this repo and (where applicable) tests, docs, and configuration.
+
+| Perspective | Improvement | Where it lives | What it does |
+| --- | --- | --- | --- |
+| **PM** | Auto-Create PR | [`src/core/auto-pr.ts`](./src/core/auto-pr.ts) | Opens a PR automatically when a run finishes, summarizing iterations, token spend, and commits. |
+| **PM** | Completion Notifications | [`src/core/notifications.ts`](./src/core/notifications.ts) | Cross-platform desktop / Slack / webhook notifications when a run finishes, fails, or hits a cap. |
+| **PM** | Interactive Objective Wizard | [`src/cli/wizard.ts`](./src/cli/wizard.ts) | First-run wizard that walks new users through writing a high-quality objective and picking flags. |
+| **PM** | Run History & Comparison | [`src/core/run-history.ts`](./src/core/run-history.ts) | Persistent local index of runs with diff/compare so you can see how runs performed against each other. |
+| **PM** | Pause / Steer / Resume | [`src/core/steering.ts`](./src/core/steering.ts) | Drop a steering note mid-run; the next iteration picks it up so you can redirect without restarting. |
+| **Architect** | Library Mode / Programmatic API | [`src/index.ts`](./src/index.ts) | Public exports so gnhf can be embedded as a library — useful for CI runners and custom orchestrators. |
+| **Architect** | CLI Decomposition | [`src/cli/`](./src/cli/) | The monolithic `cli.ts` is decomposed into focused modules (`branch-management`, `parsers`, `prompt-handling`, `screen`, `init`, `wizard`). |
+| **Architect** | Checkpoint / Restart | [`src/core/checkpoint.ts`](./src/core/checkpoint.ts) | Snapshots run state so a crashed or killed run can be resumed without losing iteration progress. |
+| **Architect** | Headless / CI Mode | [`src/headless-renderer.ts`](./src/headless-renderer.ts) | Non-TUI renderer with structured stdout, suitable for GitHub Actions, GitLab CI, and other CI runners. |
+| **Architect** | Security Audit | [`SECURITY.md`](./SECURITY.md) | Threat model, supply-chain posture, and a coordinated disclosure policy. |
+| **VP Engineering** | Docs Site | [`docs/.vitepress/`](./docs/.vitepress/), [`docs/guide/`](./docs/guide/) | Full VitePress docs site — getting started, agents, configuration, and advanced usage. |
+| **VP Engineering** | Contributor Guide | [`CONTRIBUTING.md`](./CONTRIBUTING.md), [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md), [`MAINTAINERS.md`](./MAINTAINERS.md) | Contribution workflow, governance, code of conduct, and named maintainers. |
+| **VP Engineering** | Landing Page | [`docs/landing/`](./docs/landing/) | Static marketing landing page with positioning, feature grid, and CTA. |
+| **VP Engineering** | Telemetry | [`src/core/telemetry.ts`](./src/core/telemetry.ts) | Opt-in anonymous usage telemetry for understanding which features get used in the real world. |
+| **VP Engineering** | Structured Roadmap | [`ROADMAP.md`](./ROADMAP.md) | Public roadmap broken into now / next / later, with size estimates per item. |
+| **CEO** | Business Model | [`BUSINESS_MODEL.md`](./BUSINESS_MODEL.md) | Monetization plan, target segments, pricing experiments, and unit-economics framing. |
+| **CEO** | Strategic Positioning | [`POSITIONING.md`](./POSITIONING.md) | Category definition, competitive landscape, differentiators, and messaging pillars. |
+| **CEO** | Partnerships | [`PARTNERSHIPS.md`](./PARTNERSHIPS.md) | Partnership strategy across agent providers, IDE vendors, CI platforms, and the open-source ecosystem. |
+| **UX / VC** | Usage Analytics & Cost Tracking | [`src/core/analytics.ts`](./src/core/analytics.ts) | Per-run cost tracking, token-spend rollups, and usage analytics surfaced in run history. |
+
+### Why these specific improvements?
+
+The 19 items were selected because they target the gaps a serious fork of an autonomous-coding orchestrator needs to close before it can be adopted at a team or org level: **observability** (telemetry, analytics, run history), **embeddability** (library mode, headless mode, programmatic API), **trust & governance** (security, code of conduct, contributor guide, maintainers), **distribution** (docs site, landing page), **operational ergonomics** (checkpoint/restart, steering, notifications, auto-PR, wizard), and **strategic clarity** (business model, positioning, partnerships, roadmap). Each one is implemented end-to-end rather than scaffolded.
+
+### Getting started with the fork
+
+```sh
+# Clone the fork
+git clone https://github.com/hmiglani30/gnhf.git
+cd gnhf
+
+# Or use the bot mirror
+git clone https://github.com/hmiglani30-bot/good-night-have-fun.git
+cd good-night-have-fun
+
+npm install
+npm run build
+npm link
+
+# Use the new programmatic API
+node -e "import('gnhf').then(m => console.log(Object.keys(m)))"
+
+# Or run in CI / headless mode
+gnhf --headless "your objective"
+```
+
+Everything below this section is the original upstream documentation — the fork is fully backwards-compatible with the upstream CLI surface.
+
+---
 
 ## Quick Start
 
